@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DS Mart — Flipkart-like Mobile Web App</title>
+<meta name="theme-color" content="#2874f0" />
+<style>
+  :root{
+    --primary:#2874f0; --accent:#ff6f00; --bg:#f5f6f8; --card:#fff; --muted:#6b7280; --danger:#e11d48;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:var(--bg);color:#111}
+  /* HEADER: only Search and My Profile here */
+  header{position:sticky;top:0;z-index:50;background:var(--primary);color:#fff;padding:10px 12px;display:flex;gap:8px;align-items:center}
+  .logo{font-weight:800;font-size:1.1rem}
+  .search{flex:1;display:flex;gap:6px}
+  .search input{flex:1;padding:10px;border-radius:8px;border:0;font-size:14px}
+  .hdr-btn{background:#ffffff18;color:#fff;border:1px solid #ffffff2e;padding:8px 10px;border-radius:10px;cursor:pointer}
+
+  /* CONTENT WRAP */
+  #content{padding:12px 12px 80px 12px;max-width:900px;margin:0 auto}
+
+  /* PRODUCT CARDS */
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  @media(min-width:700px){ .grid{grid-template-columns:repeat(3,1fr)} }
+  .card{background:var(--card);border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.06);padding:10px;display:flex;flex-direction:column;gap:6px}
+  .card img{width:100%;height:150px;object-fit:cover;border-radius:10px;background:#e5e7eb}
+  .title{font-weight:700}
+  .price{color:var(--primary);font-weight:800}
+  .row{display:flex;gap:8px;align-items:center}
+  .row.space{justify-content:space-between}
+  .btn{padding:10px;border-radius:10px;border:0;cursor:pointer}
+  .btn.primary{background:var(--primary);color:#fff}
+  .btn.ghost{background:#fff;border:1px solid #e5e7eb}
+  .btn.danger{background:var(--danger);color:#fff}
+  .small{font-size:12px;color:var(--muted)}
+  .pill{display:inline-flex;gap:6px;align-items:center;background:#eef4ff;color:#2257cf;padding:4px 8px;border-radius:999px;font-weight:700}
+
+  /* BOTTOM NAV: all options here (Home, Cart, Orders, Settings) */
+  nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e5e7eb;display:flex;justify-content:space-around;z-index:40}
+  nav button{flex:1;padding:10px 6px;background:transparent;border:0;font-weight:700}
+
+  /* DRAWERS / MODALS */
+  .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:60}
+  .modal{width:100%;max-width:520px;background:#fff;border-radius:12px;padding:14px}
+  .form{display:grid;gap:8px}
+  .form input, .form textarea, .form select{padding:10px;border-radius:10px;border:1px solid #e5e7eb;font-size:14px}
+
+  /* LISTS */
+  .list{display:grid;gap:8px}
+  .item{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px}
+
+  /* AVATAR */
+  .avatar{width:64px;height:64px;border-radius:999px;object-fit:cover;background:#e5e7eb}
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">DS Mart</div>
+    <div class="search">
+      <input id="searchInput" placeholder="Search for products, brands and more" />
+      <button class="hdr-btn" id="doSearch">Go</button>
+    </div>
+    <button class="hdr-btn" id="openProfile">My Profile</button>
+  </header>
+
+  <div id="content"></div>
+
+  <nav>
+    <button id="navHome">Home</button>
+    <button id="navCart">Cart</button>
+    <button id="navOrders">Orders</button>
+    <button id="navSettings">Settings</button>
+  </nav>
+
+  <!-- ===== Modals ===== -->
+  <!-- Profile modal (customer area: login/create/forgot + profile + saved products) -->
+  <div class="modal-back" id="profileModal">
+    <div class="modal">
+      <div class="row space">
+        <h3>My Profile</h3>
+        <button class="btn ghost" onclick="closeModal('profileModal')">Close</button>
+      </div>
+      <div id="profileContent"></div>
+    </div>
+  </div>
+
+  <!-- Add Product (owner) -->
+  <div class="modal-back" id="addProductModal">
+    <div class="modal">
+      <div class="row space">
+        <h3>Add Product</h3>
+        <button class="btn ghost" onclick="closeModal('addProductModal')">Close</button>
+      </div>
+      <form id="addProductForm" class="form">
+        <input id="pName" placeholder="Product name" required />
+        <div class="row" style="gap:8px">
+          <input id="pPrice" type="number" min="0" step="0.01" placeholder="Price (₹)" required />
+          <input id="pCategory" placeholder="Category" />
+        </div>
+        <div class="small">Upload image file OR paste an image URL</div>
+        <input id="pImageUrl" placeholder="Image URL (optional)" />
+        <input id="pImageFile" type="file" accept="image/*" />
+        <button class="btn primary" type="submit">Add product</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs (compat for simplicity) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-storage-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/emailjs-com@3.2.0/dist/email.min.js"></script>
+
+  <script>
+  /**************** CONFIG ****************/
+  // EmailJS (order notifications)
+  (function(){ emailjs.init('E8cAV9p-pSYDnM8kE'); })();
+  const EMAIL_SERVICE='service_c4p68ag';
+  const EMAIL_TEMPLATE='template_214uijp';
+  const ORDER_NOTIFY='dipamghosh85@gmail.com';
+
+  // Firebase (from your project)
+  const firebaseConfig = {
+    apiKey: "AIzaSyC5MGkOf5_0cF-xQrcA1PBSSvq6Y-AarSc",
+    authDomain: "ds-mart-888d2.firebaseapp.com",
+    projectId: "ds-mart-888d2",
+    storageBucket: "ds-mart-888d2.firebasestorage.app",
+    messagingSenderId: "108308848034",
+    appId: "1:108308848034:web:a8b3fe5e8784a4771e66fb",
+    measurementId: "G-KY618BJER7"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+  const storage = firebase.storage();
+
+  /**************** STATE & HELPERS ****************/
+  const fmt = n => '₹' + Number(n||0).toFixed(2);
+  const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  const el = id => document.getElementById(id);
+  const q = sel => document.querySelector(sel);
+  const placeholderImg = () => `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="100%" height="100%" fill="#eee"/><text x="50%" y="50%" font-size="28" text-anchor="middle" fill="#888" dy=".3em">No Image</text></svg>')}`;
+  function toast(msg){ alert(msg); }
+
+  let CURRENT_USER = null; // {mobile, name, photoURL, savedIds:[], address}
+  let OWNER = null; // {email}
+  let CART = JSON.parse(localStorage.getItem('ds_cart')||'[]');
+
+  function saveCart(){ localStorage.setItem('ds_cart', JSON.stringify(CART)); renderCartPage(); }
+
+  /**************** PRODUCTS ****************/
+  async function fetchProducts(){
+    const snap = await db.collection('products').orderBy('createdAt','desc').get();
+    return snap.docs.map(d=>({id:d.id, ...d.data()}));
+  }
+
+  async function uploadImageFile(file, folder){
+    const ref = storage.ref().child(`${folder}/${Date.now()}-${file.name.replace(/\s+/g,'_')}`);
+    await ref.put(file);
+    return await ref.getDownloadURL();
+  }
+
+  async function addProductToDB({name, price, category, imageUrl}){
+    await db.collection('products').add({
+      name, price:Number(price), category:category||'General', image:imageUrl||'', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+
+  /**************** CUSTOMER AUTH (mobile + password) ****************/
+  // Firestore: users/{mobile} => {password, name, address, photoURL, savedIds:[]}
+  async function getUserDoc(mobile){ return db.collection('users').doc(mobile); }
+  async function loadUser(mobile){ const d = await (await getUserDoc(mobile)).get(); return d.exists ? d.data() : null; }
+  async function createUser({mobile, password, name}){
+    await getUserDoc(mobile).set({ password, name:name||'Customer', mobile, savedIds:[], address:'', photoURL:'' });
+  }
+  async function updateUser(mobile, data){ await getUserDoc(mobile).set(data, {merge:true}); }
+
+  async function loginCustomer(mobile, password){
+    const u = await loadUser(mobile); if(!u) throw new Error('Account not found');
+    if (u.password !== password) throw new Error('Wrong password');
+    CURRENT_USER = u; toast('Logged in'); refreshProfileView(); }
+
+  async function registerCustomer(mobile, password, name){
+    const exists = await loadUser(mobile); if (exists) throw new Error('Mobile already registered');
+    await createUser({mobile, password, name});
+    CURRENT_USER = await loadUser(mobile); toast('Account created & logged in'); refreshProfileView(); }
+
+  async function forgotPasswordStart(mobile){
+    const u = await loadUser(mobile); if(!u) throw new Error('Mobile not registered');
+    // For demo: directly allow reset (no OTP). In production use SMS OTP provider.
+    q('#profileContent').innerHTML = renderResetPasswordForm(mobile);
+  }
+
+  async function resetPassword(mobile, newPass){ await updateUser(mobile, {password:newPass}); toast('Password updated'); showProfile(); }
+
+  function logoutCustomer(){ CURRENT_USER=null; toast('Logged out'); refreshProfileView(); }
+
+  /**************** OWNER AUTH (email/password via Firebase) ****************/
+  // Owners collection: owners/{email} must exist to allow product write
+  async function ownerSignIn(email, password){
+    await auth.signInWithEmailAndPassword(email, password);
+    const doc = await db.collection('owners').doc(email.toLowerCase()).get();
+    if (!doc.exists){ await auth.signOut(); throw new Error('This email is not authorized as owner'); }
+    OWNER = {email}; toast('Owner signed in'); renderSettingsPage(); }
+  async function ownerSignOut(){ await auth.signOut(); OWNER=null; toast('Owner signed out'); renderSettingsPage(); }
+
+  /**************** WISHLIST (saved products) ****************/
+  function isSaved(pid){ return CURRENT_USER && Array.isArray(CURRENT_USER.savedIds) && CURRENT_USER.savedIds.includes(pid); }
+  async function toggleSave(pid){
+    if (!CURRENT_USER){ toast('Login to save'); return; }
+    const set = new Set(CURRENT_USER.savedIds||[]);
+    set.has(pid) ? set.delete(pid) : set.add(pid);
+    CURRENT_USER.savedIds = Array.from(set);
+    await updateUser(CURRENT_USER.mobile, {savedIds: CURRENT_USER.savedIds});
+    if (q('#profileModal').style.display==='flex') refreshProfileView();
+    renderHomePage();
+  }
+
+  /**************** ORDERS ****************/
+  async function placeOrder(){
+    if (!CURRENT_USER){ toast('Login first (My Profile)'); return; }
+    if (!CART.length){ toast('Cart is empty'); return; }
+    const orderId = 'ORD-' + uid().toUpperCase();
+    const total = CART.reduce((s,p)=> s + Number(p.price||0), 0);
+    const order = {
+      orderId,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      userMobile: CURRENT_USER.mobile,
+      items: CART.map(p=>({id:p.id,name:p.name,price:p.price,qty:1})),
+      total,
+      status:'new'
+    };
+    await db.collection('orders').add(order);
+    // email notify
+    try{ await emailjs.send(EMAIL_SERVICE, EMAIL_TEMPLATE, {
+      to_email: ORDER_NOTIFY,
+      from_name: CURRENT_USER.name||CURRENT_USER.mobile,
+      order_id: orderId,
+      order_items: CART.map(p=>p.name).join(', '),
+      amount: fmt(total),
+      phone: CURRENT_USER.mobile,
+      address: CURRENT_USER.address||''
+    }); }catch(e){ console.warn('EmailJS failed', e); }
+    CART = []; saveCart(); toast('Order placed'); showOrdersPage();
+  }
+
+  async function fetchMyOrders(){
+    if (!CURRENT_USER) return [];
+    const snap = await db.collection('orders').where('userMobile','==',CURRENT_USER.mobile).orderBy('createdAt','desc').get();
+    return snap.docs.map(d=>({id:d.id, ...d.data()}));
+  }
+
+  /**************** RENDER PAGES ****************/
+  // Home (products)
+  async function renderHomePage(){
+    el('content').innerHTML = `<h2>Products</h2><div id="prodGrid" class="grid"></div>`;
+    const products = await fetchProducts();
+    const grid = el('prodGrid'); grid.innerHTML='';
+    const term = (el('searchInput').value||'').toLowerCase();
+    products.filter(p=> !term || (p.name||'').toLowerCase().includes(term)).forEach(p=>{
+      const card = document.createElement('div'); card.className='card';
+      card.innerHTML = `
+        <img src="${p.image||placeholderImg()}" alt="${(p.name||'').replace(/&/g,'&amp;')}">
+        <div class="title">${p.name||''}</div>
+        <div class="small">${p.category||''}</div>
+        <div class="row space"><div class="price">${fmt(p.price)}</div>
+          <div class="row">
+            <button class="btn ghost" data-act="save" title="Save">${isSaved(p.id)?'★ Saved':'☆ Save'}</button>
+            <button class="btn primary" data-act="add">Add</button>
+          </div>
+        </div>`;
+      card.querySelector('[data-act="add"]').onclick = ()=>{ CART.push({id:p.id,name:p.name,price:p.price,image:p.image}); saveCart(); toast('Added to cart'); };
+      card.querySelector('[data-act="save"]').onclick = ()=> toggleSave(p.id);
+      grid.appendChild(card);
+    });
+  }
+
+  // Cart
+  function renderCartPage(){
+    if (!CART.length){ el('content').innerHTML = `<h2>Cart</h2><div class="small">Your cart is empty</div>`; return; }
+    let total = CART.reduce((s,p)=> s + Number(p.price||0), 0);
+    el('content').innerHTML = `
+      <h2>Cart</h2>
+      <div class="list" id="cartList"></div>
+      <div class="row space" style="margin-top:8px"><div><strong>Total:</strong> ${fmt(total)}</div>
+      <button class="btn primary" onclick="placeOrder()">Place Order</button></div>`;
+    const list = el('cartList'); list.innerHTML='';
+    CART.forEach((p,i)=>{
+      const d = document.createElement('div'); d.className='item';
+      d.innerHTML = `<div class="row space"><div><strong>${p.name}</strong><div class="small">${fmt(p.price)}</div></div><div class="row"><button class="btn danger" data-i="${i}">Remove</button></div></div>`;
+      d.querySelector('button').onclick = ()=>{ CART.splice(i,1); saveCart(); };
+      list.appendChild(d);
+    });
+  }
+
+  // Orders
+  async function showOrdersPage(){
+    el('content').innerHTML = `<h2>My Orders</h2><div class="list" id="ordersList"></div>`;
+    const orders = await fetchMyOrders();
+    const wrap = el('ordersList'); wrap.innerHTML = orders.length? '' : '<div class="small">No orders yet</div>';
+    orders.forEach(o=>{
+      const it = document.createElement('div'); it.className='item';
+      const items = (o.items||[]).map(i=>`${i.name} × ${i.qty}`).join(', ');
+      it.innerHTML = `<div class="row space"><div><div class="pill">${o.orderId}</div><div class="small">Status: ${o.status}</div></div><div class="small">Total: ${fmt(o.total)}</div></div><div style="margin-top:6px">${items}</div>`;
+      wrap.appendChild(it);
+    });
+  }
+
+  // Settings (Owner login + Add product)
+  function renderSettingsPage(){
+    el('content').innerHTML = `
+      <h2>Settings</h2>
+      <div id="ownerArea"></div>`;
+    const area = el('ownerArea');
+    if (!OWNER){
+      area.innerHTML = `
+        <div class="item">
+          <h3>Owner Login</h3>
+          <div class="form">
+            <input id="ownerEmail" placeholder="Owner Gmail" />
+            <input id="ownerPass" type="password" placeholder="Password" />
+            <button class="btn primary" id="ownerLoginBtn">Login</button>
+          </div>
+          <div class="small">The email must exist in Firestore collection <code>owners</code> as a document id.</div>
+        </div>`;
+      el('ownerLoginBtn').onclick = async ()=>{
+        const em = el('ownerEmail').value.trim(); const pw = el('ownerPass').value;
+        try{ await ownerSignIn(em, pw); }catch(e){ toast('Login failed: '+e.message); }
+      };
+    } else {
+      area.innerHTML = `
+        <div class="item"><div class="row space"><div><span class="pill">Owner: ${OWNER.email}</span></div><button class="btn ghost" id="ownerOut">Sign out</button></div></div>
+        <div class="item"><div class="row space"><h3>Products</h3><button class="btn primary" id="openAddProd">Add Product</button></div><div class="small">Use the button to add products to the catalog.</div></div>`;
+      el('ownerOut').onclick = ()=> ownerSignOut();
+      el('openAddProd').onclick = ()=> openModal('addProductModal');
+    }
+  }
+
+  // Profile modal content builder
+  function renderLoggedOutProfile(){
+    return `
+      <div class="item">
+        <h3>Customer Login</h3>
+        <div class="form">
+          <input id="mobLogin" placeholder="Mobile number" />
+          <input id="mobPass" type="password" placeholder="Password" />
+          <button class="btn primary" id="btnLogin">Login</button>
+          <button class="btn ghost" id="btnCreate">Create Account</button>
+          <button class="btn ghost" id="btnForgot">Forgot Password</button>
+        </div>
+      </div>`;
+  }
+
+  function renderLoggedInProfile(){
+    const saved = CURRENT_USER?.savedIds || [];
+    return `
+      <div class="item">
+        <div class="row space"><h3>Account</h3><button class="btn ghost" id="btnLogout">Logout</button></div>
+        <div class="row" style="gap:12px;margin-top:8px">
+          <img class="avatar" src="${CURRENT_USER.photoURL||placeholderImg()}" alt="avatar"/>
+          <div>
+            <div><strong>${CURRENT_USER.name||CURRENT_USER.mobile}</strong></div>
+            <div class="small">Mobile: ${CURRENT_USER.mobile}</div>
+          </div>
+        </div>
+        <form class="form" style="margin-top:10px">
+          <input id="profName" placeholder="Name" value="${CURRENT_USER.name||''}" />
+          <textarea id="profAddr" rows="3" placeholder="Shipping address">${CURRENT_USER.address||''}</textarea>
+          <div class="small">Change photo</div>
+          <input id="profPhoto" type="file" accept="image/*" />
+          <button class="btn primary" id="btnSaveProf" type="button">Save Profile</button>
+        </form>
+      </div>
+
+      <div class="item">
+        <h3>Saved Products</h3>
+        <div id="savedList" class="list">${saved.length? '' : '<div class="small">No saved items</div>'}</div>
+      </div>
+
+      <div class="item">
+        <h3>My Orders</h3>
+        <div id="miniOrders" class="list"></div>
+      </div>`;
+  }
+
+  function renderResetPasswordForm(mobile){
+    return `
+      <div class="item">
+        <h3>Reset Password</h3>
+        <div class="form">
+          <div class="small">Mobile: ${mobile}</div>
+          <input id="newPwd" type="password" placeholder="New password" />
+          <button class="btn primary" onclick="resetPassword('${mobile}', el('newPwd').value)">Update</button>
+        </div>
+      </div>`;
+  }
+
+  async function refreshProfileView(){
+    if (!q('#profileModal') || q('#profileModal').style.display!=='flex') return;
+    showProfile();
+  }
+
+  async function showProfile(){
+    const wrap = q('#profileContent');
+    if (!CURRENT_USER){
+      wrap.innerHTML = renderLoggedOutProfile();
+      el('btnLogin').onclick = async ()=>{
+        try{ await loginCustomer(el('mobLogin').value.trim(), el('mobPass').value); }catch(e){ toast(e.message); }
+      };
+      el('btnCreate').onclick = async ()=>{
+        const m = prompt('Mobile number?'); if(!m) return; const p = prompt('Set a password'); if(!p) return; const n = prompt('Your name (optional)')||'';
+        try{ await registerCustomer(m.trim(), p, n); }catch(e){ toast(e.message); }
+      };
+      el('btnForgot').onclick = async ()=>{
+        const m = prompt('Enter your mobile number'); if(!m) return; try{ await forgotPasswordStart(m.trim()); }catch(e){ toast(e.message); }
+      };
+    } else {
+      wrap.innerHTML = renderLoggedInProfile();
+      el('btnLogout').onclick = ()=> logoutCustomer();
+      el('btnSaveProf').onclick = async ()=>{
+        const name = el('profName').value.trim(); const address = el('profAddr').value.trim();
+        let photoURL = CURRENT_USER.photoURL||''; const file = el('profPhoto').files[0];
+        try{ if(file){ photoURL = await uploadImageFile(file,'user-photos'); }
+          await updateUser(CURRENT_USER.mobile, {name,address,photoURL});
+          CURRENT_USER = await loadUser(CURRENT_USER.mobile); toast('Profile saved'); refreshProfileView(); }
+        catch(e){ toast('Failed to save: '+e.message); }
+      };
+      // load saved products
+      const saved = CURRENT_USER.savedIds||[]; const box = el('savedList'); box.innerHTML='';
+      if (saved.length){
+        const prod = await fetchProducts(); const map = new Map(prod.map(p=>[p.id,p]));
+        saved.forEach(id=>{ const p = map.get(id); if(!p) return; const d=document.createElement('div'); d.className='item'; d.innerHTML=`<div class="row space"><div><strong>${p.name}</strong><div class=small>${fmt(p.price)}</div></div><button class="btn" onclick="toggleSave('${id}')">Remove</button></div>`; box.appendChild(d); });
+      }
+      // mini orders
+      const mini = el('miniOrders'); mini.innerHTML='';
+      const orders = await fetchMyOrders();
+      if (!orders.length) mini.innerHTML = '<div class="small">No orders yet</div>';
+      orders.slice(0,5).forEach(o=>{ const d=document.createElement('div'); d.className='item'; d.innerHTML = `<div class="row space"><div class="pill">${o.orderId}</div><div class="small">${fmt(o.total)}</div></div>`; mini.appendChild(d); });
+    }
+  }
+
+  // ===== Add Product form submit (owner only) =====
+  el('addProductForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    if (!OWNER){ toast('Owner login required'); return; }
+    const name = el('pName').value.trim(); const price = Number(el('pPrice').value); const category = el('pCategory').value.trim();
+    const url = el('pImageUrl').value.trim(); const file = el('pImageFile').files[0];
+    if (!name || !(price>=0)) { toast('Enter product name & valid price'); return; }
+    let imageUrl = url;
+    try{ if (file) imageUrl = await uploadImageFile(file, 'product-images');
+      await addProductToDB({name, price, category, imageUrl});
+      toast('Product added'); closeModal('addProductModal'); el('addProductForm').reset(); renderHomePage(); }
+    catch(e){ console.error(e); toast('Failed to add: '+e.message); }
+  });
+
+  /**************** NAV & HEADER HOOKS ****************/
+  el('doSearch').onclick = ()=> renderHomePage();
+  el('searchInput').addEventListener('keydown', (e)=>{ if (e.key==='Enter') renderHomePage(); });
+  el('openProfile').onclick = ()=>{ openModal('profileModal'); showProfile(); };
+
+  el('navHome').onclick = ()=> renderHomePage();
+  el('navCart').onclick = ()=> renderCartPage();
+  el('navOrders').onclick = ()=> showOrdersPage();
+  el('navSettings').onclick = ()=> renderSettingsPage();
+
+  /**************** MODAL HELPERS ****************/
+  function openModal(id){ el(id).style.display='flex'; }
+  function closeModal(id){ el(id).style.display='none'; }
+  ['profileModal','addProductModal'].forEach(id=>{ const m=el(id); m.addEventListener('click', (e)=>{ if (e.target===m) m.style.display='none'; }); });
+
+  /**************** START ****************/
+  renderHomePage();
+
+  /**************** PWA (inline manifest + SW) ****************/
+  // Inline manifest
+  const manifest = { name: 'DS Mart', short_name: 'DSMart', start_url: '.', display: 'standalone', background_color:'#ffffff', theme_color:'#2874f0', icons: [] };
+  const link = document.createElement('link'); link.rel='manifest';
+  const blob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
+  link.href = URL.createObjectURL(blob); document.head.appendChild(link);
+
+  // Inline service worker (basic cache)
+  if ('serviceWorker' in navigator){
+    const swCode = `self.addEventListener('install',e=>{e.waitUntil(caches.open('ds-mart-v1').then(c=>c.addAll(['./'])))});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)))})`;
+    const swBlob = new Blob([swCode], {type:'text/javascript'});
+    const swUrl = URL.createObjectURL(swBlob);
+    navigator.serviceWorker.register(swUrl);
+  }
+
+  </script>
+
+<!--
+================ FIRESTORE SECURITY RULES (paste & publish) ================
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(){ return request.auth != null && exists(/databases/$(database)/documents/owners/$(request.auth.token.email)); }
+
+    match /products/{id} {
+      allow read: if true;              // everyone can view
+      allow create, update, delete: if isOwner();
+    }
+
+    match /orders/{id} {
+      allow create: if true;            // customers place orders without auth
+      allow read, list, update, delete: if isOwner();
+    }
+
+    match /users/{mobile} {
+      allow read, write: if true;       // demo only (for mobile login). For production, lock to the user.
+    }
+
+    match /owners/{email} {
+      allow read: if isOwner();
+      allow write: if isOwner();
+    }
+  }
+}
+
+================ STORAGE RULES (product & user photos) ================
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOwner(){ return request.auth != null && exists(/databases/(default)/documents/owners/$(request.auth.token.email)); }
+    match /product-images/{allPaths=**} { allow read: if true; allow write: if isOwner(); }
+    match /user-photos/{allPaths=**}    { allow read: if true; allow write: if true; } // demo: allow all
+  }
+}
+
+================ OWNER SETUP ================
+- In Firestore, create collection `owners`, document id = your owner Gmail (e.g., dipamghosh85@gmail.com), empty body.
+- In Firebase Authentication, add the same email with a password.
+- Now you can Owner Login from Settings, and Add Product will work.
+
+================ NOTES ================
+- Customer login is a simple mobile+password stored in Firestore (demo only). For production, use phone auth with OTP.
+- Forgot password uses the mobile number to set a new password.
+- Saved products are stored as an array `savedIds` inside the user doc.
+- EmailJS sends an order email to your address. Update template variables in your EmailJS template if needed.
+-->
+</body>
+</html>
